@@ -9,7 +9,6 @@ This guide has demonstrated how to deploy **IBM Fusion Access for SAN** using iS
 
 1. **iSCSI Enablement on OpenShift RHCOS Worker Nodes**
    * Applied Machine Config to enable `iscsid`, `iscsi`, and `multipathd` services
-   * Obtained IQNs for each worker node
    * Enabled multipath and verified configuration
 
 2. **Linux-IO (LIO) iSCSI Target Configuration on IBM Storage Scale**
@@ -18,23 +17,24 @@ This guide has demonstrated how to deploy **IBM Fusion Access for SAN** using iS
    * Configured iSCSI target IQN: `{iscsi-target-iqn}`
    * Created target portal group (TPG) on port {iscsi-target-port}
    * Defined {lun-count} LUNs backed by the fileio backing stores
-   * Created ACLs for each OpenShift worker node IQN (no authentication for lab)
+   * Disabled authentication and enabled dynamic node ACL generation so that all worker node IQNs can access the LUNs (lab only)
    * Saved configuration for persistence
 
 3. **IBM Fusion Access for SAN Deployment**
    * Installed IBM Fusion Operator from IBM Operator Catalog
-   * Deployed Fusion Data Foundation (FDF) on infra nodes for local storage
+   * Installed Fusion Data Foundation (FDF) and configured the storage cluster on the infra nodes
    * Configured OpenShift Image Registry storage
    * Enabled **External Systems → Storage Area Network** service
-   * Selected worker nodes for the storage cluster
-   * Created filesystem `{storage-class-name}` backed by iSCSI LUNs
+   * Kept **All Nodes (Default)** to handle requests to IBM Scale and selected both shared LUNs
+   * Created filesystem `{fas-fs-name}` backed by iSCSI LUNs
    * Verified CNSA pod deployment and filesystem health
-   * Confirmed automatic StorageClass creation (`{storage-class-name}`)
+   * Confirmed automatic StorageClass creation (`{storage-class-name}` and `{storage-class-vm-name}`)
+   * Set `{storage-class-vm-name}` as the default virtualization StorageClass before installing OpenShift Virtualization
 
 4. **Virtual Machine Deployment**
    * Installed OpenShift Virtualization Operator
    * Created HyperConverged deployment
-   * Deployed VM using `{storage-class-name}` StorageClass
+   * Deployed VM using `{storage-class-vm-name}` StorageClass
    * Verified PVC creation and fileset on Scale cluster
    * Generated I/O and monitored performance via CNSA GUI
 

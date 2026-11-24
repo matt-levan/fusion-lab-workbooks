@@ -13,19 +13,22 @@ Reserve the **TechZone Fusion Environment** with the following configuration:
 * **Worker Nodes:** {worker-node-count} dedicated worker nodes (plus infrastructure nodes)
 * **Worker Node Size:** 16 or 32 Core Worker Nodes
 
+For complete instructions on gathering reservation credentials, downloading the SSH key, and connecting to the Bastion host, refer to xref:getting-started/access.adoc[Accessing Your TechZone Lab Environment].
+
 == Cluster Verification
 
-Once the cluster is provisioned, verify the environment:
+Once connected to your environment (via local `oc` or the Bastion host), verify cluster health and node readiness:
+
+Check node status across the cluster:
 
 [source,shell]
 ----
-export KUBECONFIG=~/kubeconfig
-oc get no
+oc get nodes
 ----
 
-Expected output showing master, infra, and worker nodes:
+Expected output showing control-plane, infrastructure, and worker nodes in `Ready` status:
 
-[source,shell]
+[source,text]
 ----
 NAME                  STATUS   ROLES                  AGE   VERSION
 itz-h21pns-infra-1    Ready    worker                 8h    v1.34.9
@@ -49,80 +52,113 @@ oc get clusterversion
 
 == IBM Storage Scale Node
 
-The lab environment includes a single-node IBM Storage Scale cluster:
+The lab environment includes a dedicated IBM Storage Scale node configured as follows:
 
 * **Version:** {scale-node-version}
 * **NSDs:** {scale-nsd-count} NSDs configured, each {scale-nsd-size} in size
 * **Filesystem:** `{scale-fs-name}` created using both NSDs ({scale-fs-size} total capacity)
-* **IP Address:** `{scale-node-ip}`
+* **IP Address:** `{scale-node-ip}` (internal private subnet)
 * **Network:** Single {scale-network-iface} interface
 
 == Cluster Preparation
 
-### Required Machine Configurations
+Before deploying Fusion Access for SAN, prepare the OpenShift cluster by installing the required operator and applying the node configuration.
 
-Apply the following Machine Configurations (MCO) to prepare the OpenShift cluster:
+=== Install Kernel Module Management (KMM) Operator
 
-**1. iSCSI Multipath MCO**
+IBM Fusion Access for SAN utilizes the **Kernel Module Management (KMM)** operator to build and inject the IBM Storage Scale kernel module into worker node containers dynamically, eliminating the need for host-level kernel development packages.
 
-The MachineConfig to enable `iscsid`, `iscsi`, and `multipathd` services is available at `examples/yaml/iscsi-mco.yaml`:
+==== Option A: Install via OpenShift Web Console (Recommended)
 
-[source,yaml]
-----
-include::example$yaml/iscsi-mco.yaml[]
-----
+1. Log in to the OpenShift Web Console as `kubeadmin`.
+2. Navigate to menu:Ecosystem[Software Catalog].
+3. In the search filter box, type `Kernel Module Management`.
+4. Click the **Kernel Module Management** operator tile.
+5. Click btn:[Install].
+6. Keep the default settings:
+   * **Update channel:** `stable`
+   * **Installation mode:** All namespaces on the cluster (default)
+   * **Installed Namespace:** `openshift-kmm`
+   * **Update approval:** Automatic
+7. Click btn:[Install].
+8. Navigate to menu:Ecosystem[Installed Operators] and verify that the status reaches **Succeeded**.
 
-Apply and monitor:
+==== Option B: Install via CLI
 
-[source,shell]
-----
-oc apply -f iscsi-mco.yaml
-oc get mcp
-----
-
-Wait until the worker MCP shows `UPDATED True` and `UPDATING False`.
-
-**2. OpenShift Kernel Development MCO**
-
-From the bastion or CLI:
+Create the `openshift-kmm` namespace and apply the operator subscription:
 
 [source,shell]
 ----
-oc apply -f https://raw.githubusercontent.com/IBM/ibm-spectrum-scale-container-native/v6.0.0.x/generated/scale/mco/mco.yaml
-oc get mcp
+oc create namespace openshift-kmm
 ----
 
-Wait for completion.
-
-**3. Install the "kernel module management" operator**
-
-Install via OperatorHub or CLI as needed for the Scale module build.
-
-== Scale Node Access
-
-Login to the Scale node:
+Apply the KMM operator Subscription:
 
 [source,shell]
 ----
-ssh -i {ssh-key-path} {scale-ssh-user}@{scale-node-ip}
+cat <<EOF | oc apply -f -
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: kernel-module-management
+  namespace: openshift-kmm
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: kernel-module-management
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+EOF
+----
+
+Verify operator installation:
+
+[source,shell]
+----
+oc get csv -n openshift-kmm
+----
+
+Wait until the `PHASE` column displays `Succeeded`.
+
+=== Machine Configuration (iSCSI and Multipath)
+
+The worker nodes must have `iscsid`, `iscsi`, and `multipathd` enabled and configured. This is automated via a MachineConfig applied in the xref:fusion-access-san/iscsi-setup.adoc#_apply_iscsi_multipath_machineconfig[iSCSI Setup with LIO] section.
+
+== Scale Node Access & Filesystem Verification
+
+Connect to the Scale node using the access method described in xref:getting-started/access.adoc#_ssh_to_ibm_storage_scale_node[SSH to IBM Storage Scale node]:
+
+From the Bastion shell:
+
+[source,shell,subs="attributes+"]
+----
+ssh -i vm_ssh.key {scale-ssh-user}@{scale-node-ip}
+----
+
+Switch to the root user:
+
+[source,shell]
+----
 sudo -i
 ----
 
-Verify the filesystem:
+=== Verify Scale Filesystem
 
-[source,shell]
+Once connected to the Scale node shell as `root`, verify the filesystem mount:
+
+[source,shell,subs="attributes+"]
 ----
 df -h {scale-fs-mount}
 ----
 
-Expected output (using defaults; adjust for your environment):
+Expected output:
 
-[source,shell]
+[source,text,subs="attributes+"]
 ----
 Filesystem      Size  Used Avail Use% Mounted on
 {scale-fs-name}            {scale-fs-size}  5.2G  995G   1% {scale-fs-mount}
 ----
 
-This filesystem will be used as the backing store for the Linux-IO iSCSI target LUNs.
+This filesystem serves as the backing store for the Linux-IO (LIO) iSCSI target LUNs configured in the next step.
 
 include::partial$nav-fusion-access-san-lab-environment.adoc[]

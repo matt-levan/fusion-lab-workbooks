@@ -9,32 +9,33 @@ Before installing and configuring IBM Fusion Access for SAN, ensure the followin
 
 === Infrastructure Requirements
 
-* **Bare-metal worker nodes** with attached SAN storage
-* **A working container registry** enabled
-* **All worker nodes must connect to the same LUNs** — a shared LUN is a shared disk accessed by all worker nodes simultaneously
-* **Kubernetes pull secret** for the IBM Cloud Container Registry (ICR)
+* **Bare-metal worker nodes** with attached SAN or iSCSI storage
+* **A working container registry** configured on the cluster
+* **Shared LUN visibility:** All worker nodes in the storage pool must connect to the same shared LUNs simultaneously
+* **Network connectivity:** Minimum 10GbE dedicated storage networking between OpenShift nodes and storage targets
 
 === OpenShift Cluster Requirements
 
-* Red Hat OpenShift {ocp-version} or later
-* IBM Fusion {fusion-version} or later (GA since 2.11)
-* Worker nodes: minimum {worker-node-count} dedicated worker nodes for storage cluster
-* OpenShift cluster must have the IBM Operator Catalog configured
-* Entitlement key for IBM Cloud Container Registry
+* Red Hat OpenShift Container Platform {ocp-version} or later
+* IBM Storage Fusion {fusion-version} or later (GA since v2.11)
+* **Kernel Module Management (KMM) Operator** installed on the cluster
+* Worker nodes: Minimum {worker-node-count} dedicated worker nodes for the storage cluster
+* IBM Operator Catalog configured on the OpenShift cluster
+* Entitlement key secret configured for the IBM Cloud Container Registry (`cp.icr.io`)
 
 == Limitations
 
 === IBM Fusion Access for SAN Limitations
 
-* **Hosted Control Plane (HCP) clusters are not supported**
+* **Hosted Control Plane (HCP) clusters are not supported** (FAS requires bare-metal worker nodes)
 
 === IBM Storage Scale CNSA Limitations (applicable to Fusion Access for SAN)
 
-Since IBM Fusion Access for SAN is based on IBM Storage Scale Container Native Storage Access (CNSA), the following CNSA limitations apply:
+Since IBM Fusion Access for SAN is powered by IBM Storage Scale Container Native Storage Access (CNSA), the following architecture limitations apply:
 
-* Deployment of IBM Storage Scale pods on master nodes is not supported except for "compact" Red Hat OpenShift clusters
+* Deployment of IBM Storage Scale pods on master nodes is not supported except for "compact" (3-node) Red Hat OpenShift clusters
 * Deployment of IBM Storage Scale pods on nodes with ARM CPUs is not supported
-* Single node IBM Storage Scale container native clusters are not supported
+* Single-node IBM Storage Scale container-native clusters are not supported for production
 * Maximum number of worker nodes supported: **128**
 * Maximum number of local filesystems supported: **3**
 * Maximum number of storage nodes: **32**

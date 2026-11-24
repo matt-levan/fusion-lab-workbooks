@@ -31,14 +31,15 @@
         "emulate_dpo": 1,
         "emulate_fua_read": 1,
         "emulate_fua_write": 1,
-        "emulate_model_alias": 0,
+        "emulate_model_alias": 1,
         "emulate_pr": 1,
         "emulate_rest_reord": 0,
+        "emulate_rsoc": 1,
         "emulate_tas": 1,
         "emulate_tpu": 0,
         "emulate_tpws": 0,
         "emulate_ua_intlck_ctrl": 0,
-        "emulate_write_cache": 0,
+        "emulate_write_cache": 1,
         "enforce_pr_isids": 1,
         "force_pr_aptpl": 0,
         "is_nonrot": 0,
@@ -51,16 +52,17 @@
         "pi_prot_type": 0,
         "pi_prot_verify": 0,
         "queue_depth": 128,
+        "submit_type": 0,
         "unmap_granularity": 1,
         "unmap_granularity_alignment": 0,
         "unmap_zeroes_data": 0
       },
       "dev": "/scale/fs1/iscsilun1",
-      "name": "scale-fs1-iscsilun1",
+      "name": "iscsilun1",
       "plugin": "fileio",
       "size": 536870912000,
-      "write_back": false,
-      "wwn": "781b293e-fbf0-49fd-9b45-9a18347b49de"
+      "write_back": true,
+      "wwn": "bf688010-ada4-48ed-909c-2fcd046d36fd"
     },
     {
       "aio": false,
@@ -92,14 +94,15 @@
         "emulate_dpo": 1,
         "emulate_fua_read": 1,
         "emulate_fua_write": 1,
-        "emulate_model_alias": 0,
+        "emulate_model_alias": 1,
         "emulate_pr": 1,
         "emulate_rest_reord": 0,
+        "emulate_rsoc": 1,
         "emulate_tas": 1,
         "emulate_tpu": 0,
         "emulate_tpws": 0,
         "emulate_ua_intlck_ctrl": 0,
-        "emulate_write_cache": 0,
+        "emulate_write_cache": 1,
         "enforce_pr_isids": 1,
         "force_pr_aptpl": 0,
         "is_nonrot": 0,
@@ -112,69 +115,92 @@
         "pi_prot_type": 0,
         "pi_prot_verify": 0,
         "queue_depth": 128,
+        "submit_type": 0,
         "unmap_granularity": 1,
         "unmap_granularity_alignment": 0,
         "unmap_zeroes_data": 0
       },
       "dev": "/scale/fs1/iscsilun0",
-      "name": "scale-fs1-iscsilun0",
+      "name": "iscsilun0",
       "plugin": "fileio",
       "size": 536870912000,
       "write_back": true,
-      "wwn": "3248cc42-749c-4b5e-93eb-6b0065c89d45"
+      "wwn": "39ac1d0f-3573-40db-a636-80f70e1ff98b"
     }
   ],
   "targets": [
     {
-      "attributes": {
-        "authentication": -1,
-        "dataout_timeout": 3,
-        "dataout_timeout_retries": 5,
-        "default_erl": 0,
-        "nopin_response_timeout": 30,
-        "nopin_timeout": 15,
-        "random_datain_pdu_offsets": 0,
-        "random_datain_seq_offsets": 0,
-        "random_r2t_offsets": 0
+      "fabric": "iscsi",
+      "parameters": {
+        "cmd_completion_affinity": "-1"
       },
-      "node_acls": [
+      "tpgs": [
         {
           "attributes": {
-            "authentication": -1,
-            "dataout_timeout": 3,
-            "dataout_timeout_retries": 5,
+            "authentication": 0,
+            "cache_dynamic_acls": 1,
+            "default_cmdsn_depth": 64,
             "default_erl": 0,
-            "nopin_response_timeout": 30,
-            "nopin_timeout": 15,
-            "random_datain_pdu_offsets": 0,
-            "random_datain_seq_offsets": 0,
-            "random_r2t_offsets": 0
+            "demo_mode_discovery": 1,
+            "demo_mode_write_protect": 0,
+            "fabric_prot_type": 0,
+            "generate_node_acls": 1,
+            "login_keys_workaround": 1,
+            "login_timeout": 15,
+            "prod_mode_write_protect": 0,
+            "t10_pi": 0,
+            "tpg_enabled_sendtargets": 1
           },
-          "mapped_luns": [
+          "enable": true,
+          "luns": [
             {
-              "alias": "cec2b1fdc4",
-              "index": 0,
-              "tpg_lun": 0,
-              "write_protect": false
+              "alias": "c18e83ca5c",
+              "alua_tg_pt_gp_name": "default_tg_pt_gp",
+              "index": 1,
+              "storage_object": "/backstores/fileio/iscsilun1"
             },
             {
-              "alias": "eae96eaffe",
-              "index": 1,
-              "tpg_lun": 1,
-              "write_protect": false
+              "alias": "3ddfe6df15",
+              "alua_tg_pt_gp_name": "default_tg_pt_gp",
+              "index": 0,
+              "storage_object": "/backstores/fileio/iscsilun0"
             }
-          ]
+          ],
+          "node_acls": [],
+          "parameters": {
+            "AuthMethod": "CHAP,None",
+            "DataDigest": "CRC32C,None",
+            "DataPDUInOrder": "Yes",
+            "DataSequenceInOrder": "Yes",
+            "DefaultTime2Retain": "20",
+            "DefaultTime2Wait": "2",
+            "ErrorRecoveryLevel": "0",
+            "FirstBurstLength": "65536",
+            "HeaderDigest": "CRC32C,None",
+            "IFMarkInt": "Reject",
+            "IFMarker": "No",
+            "ImmediateData": "Yes",
+            "InitialR2T": "Yes",
+            "MaxBurstLength": "262144",
+            "MaxConnections": "1",
+            "MaxOutstandingR2T": "1",
+            "MaxRecvDataSegmentLength": "8192",
+            "MaxXmitDataSegmentLength": "262144",
+            "OFMarkInt": "Reject",
+            "OFMarker": "No",
+            "TargetAlias": "LIO Target"
+          },
+          "portals": [
+            {
+              "ip_address": "0.0.0.0",
+              "iser": false,
+              "offload": false,
+              "port": 3260
+            }
+          ],
+          "tag": 1
         }
       ],
-      "portals": [
-        {
-          "ip_address": "0.0.0.0",
-          "iser": false,
-          "offload": false,
-          "port": 3260
-        }
-      ],
-      "tag": 1,
       "wwn": "iqn.2022-06.com.scale.scalenode1:tgt0"
     }
   ]

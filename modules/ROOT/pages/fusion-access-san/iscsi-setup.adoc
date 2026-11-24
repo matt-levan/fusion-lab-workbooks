@@ -9,129 +9,167 @@ This section covers configuring iSCSI on OpenShift worker nodes using Linux-IO (
 
 === About iSCSI
 
-A little-known fact: IBM together with Cisco Systems jointly developed the iSCSI protocol in 1998. It was submitted as a draft standard in 2000 and officially published as RFC 3720 by the IETF in 2004.
+IBM and Cisco Systems jointly developed the iSCSI protocol in 1998. It was submitted as a draft standard in 2000 and officially published as RFC 3720 by the IETF in 2004.
 
 iSCSI encapsulates SCSI commands and data into TCP/IP packets for transmission over a standard network. It is widely used due to its cost-effectiveness and simplicity compared to alternatives like Fibre Channel.
 
-The 3 core components of iSCSI:
-* **iSCSI initiator:** Client-side software/hardware that connects to storage
-* **iSCSI target:** Storage device that receives connections and serves storage
-* **iSCSI Qualified Name (IQN):** Unique name used to address iSCSI targets
+The three core components of iSCSI:
+
+* **iSCSI initiator:** Client-side software or hardware that connects to storage (OpenShift worker nodes).
+* **iSCSI target:** Storage server that receives connections and serves storage (IBM Storage Scale node).
+* **iSCSI Qualified Name (IQN):** Unique identifier used to address iSCSI initiators and targets.
 
 === Why iSCSI for OpenShift?
 
-In the context of OpenShift, deploying worker nodes with Fibre Channel adapters connected to SAN-attached storage is costly. iSCSI is a more efficient and cost-effective alternative. We use the Linux-IO (LIO) target, which is included in the Linux kernel and supports a wide variety of protocols including FCoE and iSCSI.
+Deploying worker nodes with dedicated Fibre Channel host bus adapters (HBAs) connected to SAN-attached storage can be costly. iSCSI is an efficient and cost-effective alternative running over standard Ethernet. We use the Linux-IO (LIO) target subsystem built into the Linux kernel.
 
-=== Example Scripts
+=== Example Scripts and Manifests
 
-The complete configuration scripts used in this guide are available in the repository examples directory:
+The configuration manifests and helper scripts are available in the repository examples directory:
 
-* `examples/scripts/iscsi-init.sh` — iSCSI initiator setup on worker nodes
-* `examples/scripts/targetcli-config.sh` — iSCSI target configuration on Scale node
-* `examples/yaml/iscsi-mco.yaml` — MachineConfig for iSCSI/multipath enablement
-* `examples/yaml/targetcli-saveconfig.json` — Reference targetcli saveconfig output
+* `examples/yaml/iscsi-mco.yaml` — MachineConfig for multipath configuration and iSCSI service enablement
+* `examples/scripts/iscsi-init.sh` — Script to automate discovery and login from OpenShift nodes
+* `examples/scripts/targetcli-config.sh` — Script to automate targetcli configuration on the Scale node
+* `examples/yaml/targetcli-saveconfig.json` — Reference targetcli configuration export
 
 == Step 1: Prepare the Scale Node
 
+Log in to the IBM Storage Scale node as described in xref:getting-started/access.adoc#_ssh_to_ibm_storage_scale_node[Accessing Your TechZone Lab Environment].
+
 === Install Required Packages
+
+Install `targetcli` and `iscsi-initiator-utils`:
 
 [source,shell]
 ----
-yum install targetcli
-sudo dnf install iscsi-initiator-utils -y
+dnf install -y targetcli iscsi-initiator-utils
 ----
 
 === Configure Firewall
 
-Open port {iscsi-target-port} for iSCSI:
+Verify if `firewalld` is active:
 
 [source,shell]
 ----
-firewall-cmd --permanent --add-port {iscsi-target-port}/tcp
-systemctl stop firewalld
-systemctl start firewalld
+firewall-cmd --state
+----
+
+If the firewall is running, permanently open port `{iscsi-target-port}` (3260/tcp) for iSCSI traffic and reload rules:
+
+[source,shell,subs="attributes+"]
+----
+firewall-cmd --permanent --add-port={iscsi-target-port}/tcp
+----
+
+Reload firewall configuration:
+
+[source,shell]
+----
+firewall-cmd --reload
+----
+
+Verify open ports:
+
+[source,shell]
+----
 firewall-cmd --list-ports
 ----
 
-Expected output (port may vary):
-```
+Expected output showing open ports:
+
+[source,text,subs="attributes+"]
+----
 1191/tcp {iscsi-target-port}/tcp 60000-61000/tcp
-```
+----
 
-=== Verify Filesystem
+=== Verify Filesystem Mount
 
-[source,shell]
+Verify that the Scale filesystem is mounted and has sufficient capacity:
+
+[source,shell,subs="attributes+"]
 ----
 df -h {scale-fs-mount}
 ----
 
-This filesystem (`{scale-fs-name}`) will be used as the backing store for iSCSI LUNs.
+This filesystem (`{scale-fs-name}`) serves as the backing store for the iSCSI LUNs.
 
-== Step 2: Configure iSCSI Initiator on Worker Nodes
+== Step 2: Configure Worker Nodes via MachineConfig
+
+Before connecting to the iSCSI target, apply the MachineConfig to configure `/etc/multipath.conf` and enable the `iscsid.service`, `iscsi.service`, and `multipathd.service` systemd units on all worker nodes.
+
+The embedded `/etc/multipath.conf` sets `find_multipaths no` so that multipath maps are created for every iSCSI LUN, including LUNs with a single path, and blacklists the local OS disks (`vda`, `sr`, `loop`). With the default `find_multipaths yes`, `multipath -ll` returns no devices for single-path LUNs.
 
 === Apply iSCSI Multipath MachineConfig
 
-Apply the MachineConfig to enable `iscsid`, `iscsi`, and `multipathd` services on all worker nodes:
+From your workstation or Bastion CLI with `oc` authenticated:
 
 [source,yaml]
 ----
 include::example$yaml/iscsi-mco.yaml[]
 ----
 
+Apply the MachineConfig manifest:
+
 [source,shell]
 ----
-oc apply -f iscsi-mco.yaml
+oc apply -f https://raw.githubusercontent.com/IBM/fusion-lab-workbooks/main/modules/ROOT/examples/yaml/iscsi-mco.yaml
+----
+
+Monitor the worker MachineConfigPool rollout:
+
+[source,shell]
+----
 oc get mcp
 ----
 
-Wait until the worker MCP shows `UPDATED True` and `UPDATING False`.
+Wait until the worker pool shows `UPDATED True` and `UPDATING False`:
 
-=== Enable Multipath and iSCSI on Worker Nodes
-
-The complete initiator setup is automated in `examples/scripts/iscsi-init.sh`. Key steps:
-
-[source,shell]
+[source,text]
 ----
-include::example$scripts/iscsi-init.sh[]
+NAME     CONFIG                                             UPDATED   UPDATING   DEGRADED   MACHINECOUNT   READYMACHINECOUNT   UPDATEDMACHINECOUNT   DEGRADEDMACHINECOUNT
+master   rendered-master-2522f4248b85c72236c5d5ceb8eb85f0   True      False      False      3              3                   3                     0
+worker   rendered-worker-c2b84fbd9efc36675446505bb6ff668b   True      False      False      8              8                   8                     0
 ----
 
-=== Obtain IQNs
+== Step 3: Configure iSCSI Target on Scale Node using `targetcli`
 
-Run the IQN retrieval on each worker node to get their IQNs for ACL configuration on the target.
+`targetcli` provides an interactive shell with a tree-like hierarchy to manage the Linux-IO target subsystem.
 
-[source,shell]
-----
-for WORKER in $(oc get nodes | grep worker | awk '{print $1}'); do
-  echo "$WORKER IQN:"
-  ssh -i /tmp/ocp/cluster/id_rsa core@$WORKER sudo cat /etc/iscsi/initiatorname.iscsi
-done
-----
+=== Configuration Workflow
 
-== Step 3: Configure iSCSI Target on Scale Node using targetcli
+1. Create file-backed storage objects in `backstores/fileio`
+2. Create the target IQN in `iscsi/`
+3. Map LUNs in `tpg1/luns`
+4. Configure target access permissions
+5. Save configuration and verify listener
 
-`targetcli` uses a tree-like, filesystem-based structure. Navigate and make changes by moving through directories.
+=== Launch targetcli
 
-=== Configuration Flow Overview
-
-1. Create backing store files in `backstore/fileio`
-2. Create iSCSI target IQN in `iscsi/`
-3. Configure target portal group in `iscsi/<iqn>/tpg1/`
-4. Create LUNs in `iscsi/<iqn>/tpg1/luns/`
-5. Create ACLs for initiators in `iscsi/<iqn>/tpg1/acls/`
-6. Save configuration
-
-=== Create Backing Store Files
-
-Navigate to backstore/fileio and create two {lun-size} files:
+On the Scale node shell as `root`, start `targetcli`:
 
 [source,shell]
 ----
 targetcli
+----
+
+=== Create Backing Store Files
+
+Create two {lun-size} file-backed storage objects on the Scale filesystem:
+
+[source,shell,subs="attributes+"]
+----
 /backstores/fileio create iscsilun0 {scale-fs-mount}/iscsilun0 {lun-size}
+----
+
+Create the second LUN file:
+
+[source,shell,subs="attributes+"]
+----
 /backstores/fileio create iscsilun1 {scale-fs-mount}/iscsilun1 {lun-size}
 ----
 
-Verify creation:
+Verify the backstores:
+
 [source,shell]
 ----
 /backstores/fileio ls
@@ -139,165 +177,200 @@ Verify creation:
 
 === Create iSCSI Target IQN
 
-[source,shell]
+Create the target IQN (this automatically creates default Target Portal Group `tpg1`):
+
+[source,shell,subs="attributes+"]
 ----
 /iscsi create {iscsi-target-iqn}
 ----
 
-=== Configure Target Portal Group (TPG)
+=== Configure Target Portal Group (TPG) Attributes
 
-Navigate to the TPG directory (auto-created as `tpg1`):
+Configure the target portal group for open access with dynamic node ACLs. This is intended for lab simplicity only.
 
-[source,shell]
+Disable CHAP authentication. Because authentication is disabled, the worker nodes can log in without credentials:
+
+[source,shell,subs="attributes+"]
 ----
-/iscsi/{iscsi-target-iqn}/tpg1
+/iscsi/{iscsi-target-iqn}/tpg1 set attribute authentication=0
 ----
 
-Accept defaults:
-* Interface: `0.0.0.0` (listen on all interfaces)
-* Port: `{iscsi-target-port}`
+Enable dynamic node ACL generation so that any initiator IQN (the worker nodes) is granted access to the LUNs without creating explicit ACLs:
 
-=== Create LUNs
+[source,shell,subs="attributes+"]
+----
+/iscsi/{iscsi-target-iqn}/tpg1 set attribute generate_node_acls=1
+----
 
-[source,shell]
+Disable demo mode write protection so the worker nodes can write to the LUNs:
+
+[source,shell,subs="attributes+"]
+----
+/iscsi/{iscsi-target-iqn}/tpg1 set attribute demo_mode_write_protect=0
+----
+
+Enable dynamic ACL caching so that the generated node ACLs persist across target service restarts:
+
+[source,shell,subs="attributes+"]
+----
+/iscsi/{iscsi-target-iqn}/tpg1 set attribute cache_dynamic_acls=1
+----
+
+=== Map Backstores to LUNs
+
+Map `iscsilun0` to LUN 0:
+
+[source,shell,subs="attributes+"]
 ----
 /iscsi/{iscsi-target-iqn}/tpg1/luns create /backstores/fileio/iscsilun0
+----
+
+Map `iscsilun1` to LUN 1:
+
+[source,shell,subs="attributes+"]
+----
 /iscsi/{iscsi-target-iqn}/tpg1/luns create /backstores/fileio/iscsilun1
 ----
 
-Verify:
-[source,shell]
+Verify mapped LUNs:
+
+[source,shell,subs="attributes+"]
 ----
 /iscsi/{iscsi-target-iqn}/tpg1/luns ls
 ----
 
-=== Create ACLs for Worker Nodes
+=== Save and Exit targetcli
 
-Navigate to ACLs and create entries for each worker node IQN (replace with actual IQNs from Step 2):
-
-[source,shell]
-----
-/iscsi/{iscsi-target-iqn}/tpg1/acls create iqn.1994-05.com.redhat:<worker1-iqn>
-/iscsi/{iscsi-target-iqn}/tpg1/acls create iqn.1994-05.com.redhat:<worker2-iqn>
-/iscsi/{iscsi-target-iqn}/tpg1/acls create iqn.1994-05.com.redhat:<worker3-iqn>
-----
-
-Note: Auto-mapping is enabled by default, so the two LUNs will be mapped to each client. This satisfies the prerequisite that all nodes see the same LUNs.
-
-=== Verify and Save Configuration
+Save the target configuration to disk:
 
 [source,shell]
 ----
-cd /
-ls
 saveconfig
+----
+
+Exit `targetcli`:
+
+[source,shell]
+----
 exit
 ----
 
-Configuration saved to `/etc/target/saveconfig.json`. A reference copy is available at `examples/yaml/targetcli-saveconfig.json`.
-
 === Set File Permissions
 
-[source,shell]
+Ensure proper permissions on the backing store files:
+
+[source,shell,subs="attributes+"]
 ----
 chmod 777 {scale-fs-mount}/iscsilun*
-ls -al {scale-fs-mount}/iscsilun*
 ----
 
-=== Verify Target Service
+=== Verify Target Listener
+
+Verify that the iSCSI daemon is listening on port `{iscsi-target-port}`:
+
+[source,shell,subs="attributes+"]
+----
+ss -tlpn | grep {iscsi-target-port}
+----
+
+Expected output:
+
+[source,text,subs="attributes+"]
+----
+LISTEN 0      256          0.0.0.0:{iscsi-target-port}        0.0.0.0:*    users:(("iscsi_trx",pid=...,fd=...))
+----
+
+== Step 4: Discover and Connect iSCSI LUNs from OpenShift Nodes
+
+With the target active and the MachineConfig deployed, discover and log into the target from the OpenShift nodes using `oc debug`.
+
+=== Discover iSCSI Target from Worker Nodes
+
+Run target discovery on all worker nodes:
+
+[source,shell,subs="attributes+"]
+----
+for NODE in $(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}'); do echo "=== Discovering on $NODE ==="; oc debug node/$NODE -- chroot /host iscsiadm -m discovery -t sendtargets -p {scale-node-ip} 2>/dev/null; done
+----
+
+Expected output for each node:
+
+[source,text,subs="attributes+"]
+----
+{scale-node-ip}:{iscsi-target-port},1 {iscsi-target-iqn}
+----
+
+=== Log In to the iSCSI Target
+
+Establish the iSCSI session on all worker nodes:
+
+[source,shell,subs="attributes+"]
+----
+for NODE in $(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}'); do echo "=== Logging in on $NODE ==="; oc debug node/$NODE -- chroot /host iscsiadm -m node -T {iscsi-target-iqn} -p {scale-node-ip} -l 2>/dev/null; done
+----
+
+=== Verify Block Devices on OpenShift Nodes
+
+Check that the new shared SCSI block devices (`sda`, `sdb` or similar) are visible on each node:
 
 [source,shell]
 ----
-netstat -an | grep {iscsi-target-port}
+for NODE in $(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}'); do echo "=== Devices on $NODE ==="; oc debug node/$NODE -- chroot /host lsblk 2>/dev/null; done
 ----
 
-Expected: `tcp 0 0 0.0.0.0:{iscsi-target-port} 0.0.0.0:* LISTEN`
+=== Verify Multipath Status
 
-== Step 4: Verify iSCSI Connectivity from Worker Nodes
-
-=== iSCSI Discovery
-
-Run iSCSI discovery on each worker node:
+Check multipath mapping on the worker nodes:
 
 [source,shell]
 ----
-for WORKER in $(oc get nodes | grep {worker-node-prefix} | awk '{print $1}'); do
-  ssh -i {ssh-key-path} {bastion-user}@$WORKER sudo iscsiadm -m discovery -t sendtargets -p {scale-node-ip}
-done
+for NODE in $(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[*].metadata.name}'); do echo "=== Multipath on $NODE ==="; oc debug node/$NODE -- chroot /host multipath -ll 2>/dev/null; done
 ----
 
-Each should return the target IQN.
+Expected output showing multipath device maps for both LUNs:
 
-=== Login and Session Verification
+[source,text]
+----
+360014050d784c01f99d40cab46abc818 dm-1 LIO-ORG,iscsilun0
+size=100G features='0' hwhandler='1 alua' wp=rw
+`-+- policy='service-time 0' prio=50 status=active
+  `- 7:0:0:0 sda 8:0  active ready running
+3600140524b1c32da8b04c8abf57d5d34 dm-0 LIO-ORG,iscsilun1
+size=100G features='0' hwhandler='1 alua' wp=rw
+`-+- policy='service-time 0' prio=50 status=active
+  `- 7:0:0:1 sdb 8:16 active ready running
+----
+
+== Step 5: Validate Node Drain and Recovery
+
+Validate that iSCSI connections and device mappings persist across node maintenance and reboots.
+
+Cordon a worker node:
 
 [source,shell]
 ----
-for WORKER in $(oc get nodes | grep {worker-node-prefix} | awk '{print $1}'); do
-  ssh -i {ssh-key-path} {bastion-user}@$WORKER sudo iscsiadm -m node -T {iscsi-target-iqn} -p {scale-node-ip} -l
-done
+oc adm cordon itz-ria1e6-worker-1
 ----
 
-Verify sessions on the target:
+Drain workloads from the node:
 
 [source,shell]
 ----
-targetcli sessions
+oc adm drain itz-ria1e6-worker-1 --ignore-daemonsets --delete-emptydir-data --force
 ----
 
-Expected output showing all three workers logged in.
-
-=== Verify LUN Visibility
-
-Check that each worker sees the {lun-count} {lun-size} LUNs:
+Uncordon the node once maintenance verification is complete:
 
 [source,shell]
 ----
-for WORKER in $(oc get nodes | grep {worker-node-prefix} | awk '{print $1}'); do
-  ssh -i {ssh-key-path} {bastion-user}@$WORKER sudo lsblk
-done
+oc adm uncordon itz-ria1e6-worker-1
 ----
 
-=== Multipath Check
-
-Since we only have a single target portal, multipath will not attach (single path). If multiple Scale nodes were configured as target portals, multipath would provide redundancy.
+Verify that the iSCSI block devices remain attached and available:
 
 [source,shell]
 ----
-for WORKER in $(oc get nodes | grep {worker-node-prefix} | awk '{print $1}'); do
-  ssh -i {ssh-key-path} {bastion-user}@$WORKER sudo multipath -ll
-done
+oc debug node/itz-ria1e6-worker-1 -- chroot /host multipath -ll 2>/dev/null
 ----
-
-== Step 5: Validate Persistence Across Reboot
-
-Test that iSCSI LUNs persist a worker node reboot:
-
-[source,shell]
-----
-# Cordon, drain, and reboot a worker node (replace worker-3 with actual node name)
-oc adm cordon {worker-node-prefix}3
-oc adm drain {worker-node-prefix}3 --ignore-daemonsets --delete-emptydir-data
-# Reboot via cloud provider console or IPMI
-----
-
-After reboot and node returns to Ready state:
-
-[source,shell]
-----
-oc adm uncordon {worker-node-prefix}3
-# Verify iSCSI login and LUN visibility
-for WORKER in $(oc get nodes | grep {worker-node-prefix} | awk '{print $1}'); do
-  ssh -i {ssh-key-path} {bastion-user}@$WORKER sudo lsblk
-done
-----
-
-Verify on Scale node:
-
-[source,shell]
-----
-targetcli sessions
-----
-
-All {worker-node-count} workers should show `LOGGED_IN` state.
 
 include::partial$nav-fusion-access-san-iscsi-setup.adoc[]

@@ -5,131 +5,190 @@ include::partial$fusion-access-san-attrs.adoc[]
 
 == Introduction
 
-This guide demonstrates deploying a virtual machine using the IBM Fusion Access for SAN storage class (`{storage-class-name}`) with OpenShift Virtualization.
+This guide demonstrates deploying a virtual machine using the IBM Fusion Access for SAN storage class (`{storage-class-vm-name}`) with OpenShift Virtualization.
 
 [IMPORTANT]
 ====
-Fusion Access for SAN is only supported on bare-metal worker nodes. This lab environment uses nested virtualization for demonstration purposes only.
+IBM Fusion Access for SAN is designed for bare-metal worker nodes with attached SAN/iSCSI storage. In this lab environment, nested virtualization is used for demonstration purposes.
 ====
 
 == Step 1: Install OpenShift Virtualization Operator
 
-1. Navigate to menu:Ecosystem[Software Catalog] (OperatorHub).
-2. Search for **OpenShift Virtualization**.
-3. Click on the operator to install it.
-4. Leave all defaults and click btn:[Install].
-5. After installation, click **Create HyperConverged** to create the deployment.
-6. Accept all defaults and wait for status to show **Available**.
+Before you begin, confirm that the `{storage-class-vm-name}` StorageClass exists and is set as the default virtualization StorageClass, as described in xref:fusion-access-san/deploy.adoc#_set_the_vm_storageclass_as_the_default_for_virtualization[Deploying IBM Fusion Access for SAN]. Install OpenShift Virtualization only after this is in place.
+
+1. In OpenShift Web Console, navigate to menu:Ecosystem[Software Catalog].
+2. Search for `OpenShift Virtualization`.
+3. Select the **OpenShift Virtualization** tile.
+4. Keep the default settings:
+   * **Update channel:** `stable`
+   * **Version:** the default (latest) version
+   * **Installation mode:** **A specific namespace on the cluster**. This is the only mode supported by this Operator.
+   * **Installed Namespace:** **Operator recommended Namespace** (`openshift-cnv`). The namespace does not exist yet and is created for you.
+   * **Update approval:** **Automatic**
+5. Click btn:[Install].
+6. After the operator installs successfully, click btn:[Create HyperConverged] to initialize the virtualization deployment.
+7. Accept the default configuration and click btn:[Create].
+8. Wait until the HyperConverged status displays **Available**.
 
 == Step 2: Create a Virtual Machine
 
-1. Navigate to **OpenShift Virtualization** in the left pane (refresh if needed).
-2. Click **Create VirtualMachine**.
-3. Choose a boot source (e.g., CentOS Stream 9 container disk).
-4. Select a **General Purpose** instance type.
-5. Under **Virtual Machine Details**, select the **{storage-class-name}** StorageClass from the dropdown.
-6. Click **Create VirtualMachine**.
+Because `{storage-class-vm-name}` is set as the default virtualization StorageClass, a VM created from a template is placed on it automatically.
 
-The VM will be created and started (takes a few minutes).
+1. In the left navigation menu, navigate to menu:Virtualization[Catalog].
+2. Select the `vmlab` project from the **Project** list (create it first if it does not exist).
+3. Select a template tile (for example, **CentOS Stream 9 VM**).
+4. Review the VM details, and enter a **VirtualMachine name** if you want a different one.
+5. Keep **Start this VirtualMachine after creation (RerunOnFailure)** selected.
+6. Click btn:[Quick create VirtualMachine].
+
+The virtual machine and its underlying DataVolume/PVC will be provisioned automatically.
+
+=== Optional: Use a Different StorageClass
+
+If the default virtualization StorageClass is not set, or you want a VM to use a different StorageClass, change the StorageClass of the root disk before the VM is created:
+
+1. Follow steps 1 to 3 above, then click btn:[Customize VirtualMachine] instead of btn:[Quick create VirtualMachine].
+2. On the **Customize and create VirtualMachine** page, click the **Disks** tab.
+3. For the `rootdisk` row, click the kebab menu (&#8942;) and select **Edit**.
+4. In the **Edit disk** dialog, open the **StorageClass** list and select `{storage-class-vm-name}`.
++
+[NOTE]
+====
+A message appears stating that the selected StorageClass is different from the StorageClass of the source. The boot source is cloned to the new StorageClass, so it may take several minutes before the VM is ready.
+====
+5. Click btn:[Save].
+6. Confirm that the **Storage class** column for `rootdisk` shows `{storage-class-vm-name}`.
+7. Click btn:[Create VirtualMachine].
 
 == Step 3: Verify PVC Creation
 
-Navigate to **Storage** → **PersistentVolumeClaims** in the OpenShift Virtualization namespace.
-
-A PVC is created and bound using the `{storage-class-name}` storage class.
+Verify the PersistentVolumeClaim bound to the virtual machine in the target namespace:
 
 [source,shell]
 ----
-oc get pvc -n openshift-cnv
+oc get pvc -n vmlab
 ----
 
-Expected output:
-```
-NAME                    STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS         AGE
-centos-stream9-dv       Bound    pvc-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   30Gi       RWX            {storage-class-name}   5m
-```
+Expected output showing the bound RWX PVC:
+
+[source,text,subs="attributes+"]
+----
+NAME                    STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS              AGE
+centos-stream9-dv       Bound    pvc-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   30Gi       RWX            {storage-class-vm-name}   5m
+----
 
 === Fileset Creation
 
-IBM Storage Scale CNSA creates a **fileset** for each PVC. Filesets are recommended for:
-* Granular snapshots
-* Quota enforcement
+IBM Storage Scale CNSA dynamically creates an independent **fileset** for each CSI-provisioned PVC. Filesets provide:
 
-Verify on the Scale cluster:
-```
-Fileset created for PVC: centos-stream9-dv
-```
+* Granular snapshot management
+* Storage quota enforcement
+* Data isolation per workload
 
 == Step 4: Access the Virtual Machine
 
-1. Navigate back to **OpenShift Virtualization** → **Virtual Machines**.
-2. Wait for the VM to show **Running** state.
-3. Click the VM name, then click **Console** to launch the VNC/Serial console.
-4. Login with credentials displayed on the console screen.
+1. In OpenShift Console, navigate to menu:Virtualization[VirtualMachines].
+2. Wait for the VM status to show **Running**.
+3. Click the virtual machine name to open its details.
+4. Click the **Console** tab to access the interactive VNC or serial console.
+5. Log in using the guest operating system credentials displayed on the screen.
 
 == Step 5: Generate I/O and Monitor Performance
 
-### Generate Write Traffic
+=== Generate Write Traffic
 
-In the VM console:
+Inside the VM console terminal, run a write test against the mounted filesystem:
 
 [source,shell]
 ----
 dd if=/dev/zero of=/mnt/testfile bs=1G count=5 oflag=direct
 ----
 
-### Monitor on IBM Storage Scale CNSA GUI
+=== Monitor in IBM Storage Scale CNSA GUI
 
-1. In Fusion Console, navigate to **Storage** → **Fusion Access for SAN**.
-2. Click **Link to file system dashboard** to open the CNSA GUI.
-3. Navigate to **Statistics** to view client I/O metrics for the filesystem.
+1. In the IBM Storage Fusion Console, navigate to menu:Data Foundation[External Systems].
+2. Click **Link to file system dashboard** to open the Scale GUI.
+3. In the Scale GUI, navigate to **Statistics** → **Performance** to observe client I/O metrics (IOPS, read/write throughput, and latency) in real time.
 
-You should see read/write throughput and IOPS for the VM workload.
+== Step 6: Resiliency and Failover Validation (Optional)
 
-== Step 6: Resiliency Test (Optional)
+Simulate maintenance on a worker node:
 
-Simulate a storage node failure:
+Cordon the node:
 
-. Cordon and drain a worker node that is part of the storage cluster but NOT running the VM (e.g., `{worker-node-prefix}3`):
-[source,shell]
+[source,shell,subs="attributes+"]
 ----
 oc adm cordon {worker-node-prefix}3
-oc adm drain {worker-node-prefix}3 --ignore-daemonsets --delete-emptydir-data
-# Reboot the node via cloud provider console
 ----
 
-. Verify the VM continues running and generating I/O on the remaining nodes.
+Drain workloads from the node:
 
-. Check IBM Storage Scale CNSA GUI → Statistics to confirm continued I/O.
-
-. On the Scale node, verify sessions:
-[source,shell]
+[source,shell,subs="attributes+"]
 ----
-targetcli sessions
+oc adm drain {worker-node-prefix}3 --ignore-daemonsets --delete-emptydir-data --force
 ----
 
-. When the node returns, uncordon and verify it rejoins:
-[source,shell]
+When maintenance is complete, uncordon the node:
+
+[source,shell,subs="attributes+"]
 ----
 oc adm uncordon {worker-node-prefix}3
-oc get pods -n ibm-spectrum-scale
-targetcli sessions
 ----
 
-All {worker-node-count} workers should show `LOGGED_IN` and core pods should be running on the recovered node.
+Verify that the Scale core pods and iSCSI sessions recover on the node:
+
+[source,shell]
+----
+oc get pods -n ibm-spectrum-scale
+----
 
 == Step 7: Containerized Application PVC (Optional)
 
-While Fusion Access for SAN is intended for OpenShift Virtualization, the underlying CNSA can also serve containerized applications.
+Although Fusion Access for SAN is primarily optimized for OpenShift Virtualization VMs, the underlying StorageClass can also provision volumes for standard containerized workloads.
 
-1. Navigate to **Storage** → **PersistentVolumeClaims** in the `ibm-spectrum-scale` namespace.
-2. Click **Create PersistentVolumeClaim**.
-3. Configure:
-   * Name: `cnsa-csi-pvc`
-   * Size: `10GB`
-   * StorageClass: `{storage-class-name}`
-   * Access Mode: `RWX`
-4. Click **Create** and monitor events.
-5. Verify the PVC is bound and available on the Scale cluster.
+Create a PVC using the StorageClass:
+
+[source,yaml,subs="attributes+"]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fas-demo-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: {storage-class-name}
+----
+
+Apply the manifest:
+
+[source,shell,subs="attributes+"]
+----
+oc apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fas-demo-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: {storage-class-name}
+EOF
+----
+
+Verify that the PVC reaches `Bound` status:
+
+[source,shell]
+----
+oc get pvc fas-demo-pvc
+----
 
 include::partial$nav-fusion-access-san-vm-deploy.adoc[]

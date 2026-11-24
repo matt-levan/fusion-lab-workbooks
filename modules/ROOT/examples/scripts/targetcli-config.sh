@@ -9,7 +9,6 @@
 #   ISCSI_TARGET_PORT    - iSCSI target port (default: 3260)
 #   LUN_SIZE             - LUN size (default: 500G)
 #   LUN_COUNT            - Number of LUNs to create (default: 2)
-#   SCALE_SSH_USER       - SSH user for Scale node (default: root)
 
 set -e
 
@@ -19,21 +18,23 @@ set -e
 : "${ISCSI_TARGET_PORT:=3260}"
 : "${LUN_SIZE:=500G}"
 : "${LUN_COUNT:=2}"
-: "${SCALE_SSH_USER:=root}"
 
 echo "=== targetcli iSCSI Target Configuration ==="
 echo "Using SCALE_FS_MOUNT=${SCALE_FS_MOUNT}, ISCSI_TARGET_IQN=${ISCSI_TARGET_IQN}, ISCSI_TARGET_PORT=${ISCSI_TARGET_PORT}, LUN_SIZE=${LUN_SIZE}, LUN_COUNT=${LUN_COUNT}"
 
 # Install required packages
 echo "Installing targetcli and iscsi-initiator-utils..."
-yum install -y targetcli
-dnf install -y iscsi-initiator-utils
+dnf install -y targetcli iscsi-initiator-utils
 
 # Configure firewall
 echo "Configuring firewall for iSCSI port ${ISCSI_TARGET_PORT}..."
-firewall-cmd --permanent --add-port ${ISCSI_TARGET_PORT}/tcp
-systemctl restart firewalld
-firewall-cmd --list-ports
+if systemctl is-active --quiet firewalld; then
+  firewall-cmd --permanent --add-port ${ISCSI_TARGET_PORT}/tcp
+  firewall-cmd --reload
+  firewall-cmd --list-ports
+else
+  echo "firewalld is not currently active. If enabling firewalld, ensure port ${ISCSI_TARGET_PORT}/tcp is opened."
+fi
 
 # Create backing store files on Scale filesystem
 echo "Creating backing store files on ${SCALE_FS_MOUNT}..."
@@ -52,6 +53,8 @@ targetcli /iscsi create ${ISCSI_TARGET_IQN}
 echo "Configuring Target Portal Group..."
 targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1 set attribute authentication=0
 targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1 set attribute generate_node_acls=1
+targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1 set attribute demo_mode_write_protect=0
+targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1 set attribute cache_dynamic_acls=1
 
 # Create LUNs
 echo "Creating LUNs..."
@@ -62,14 +65,6 @@ done
 echo "Verifying LUNs..."
 targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1/luns ls
 
-# Create ACLs for worker nodes (replace IQNs with actual values from initiators)
-echo "Creating ACLs for worker nodes..."
-echo "NOTE: Replace <worker1-iqn>, <worker2-iqn>, <worker3-iqn> with actual IQNs from initiators"
-echo "Run this script after obtaining IQNs from worker nodes, or manually create ACLs:"
-for i in 1 2 3; do
-  echo "  targetcli /iscsi/${ISCSI_TARGET_IQN}/tpg1/acls create iqn.1994-05.com.redhat:<worker${i}-iqn>"
-done
-
 # Set file permissions
 echo "Setting file permissions on backing store files..."
 chmod 777 ${SCALE_FS_MOUNT}/iscsilun*
@@ -77,7 +72,7 @@ ls -al ${SCALE_FS_MOUNT}/iscsilun*
 
 # Verify target service
 echo "Verifying target service is listening on port ${ISCSI_TARGET_PORT}..."
-netstat -an | grep ${ISCSI_TARGET_PORT}
+ss -tlpn | grep ${ISCSI_TARGET_PORT} || netstat -an | grep ${ISCSI_TARGET_PORT} || true
 
 # Save configuration
 echo "Saving targetcli configuration..."
@@ -85,8 +80,3 @@ targetcli saveconfig
 
 echo "=== targetcli Configuration Complete ==="
 echo "Configuration saved to /etc/target/saveconfig.json"
-echo ""
-echo "Next steps:"
-echo "1. Run iSCSI discovery on worker nodes: iscsiadm -m discovery -t sendtargets -p <scale-node-ip>"
-echo "2. Login to target: iscsiadm -m node -T ${ISCSI_TARGET_IQN} -p <scale-node-ip> -l"
-echo "3. Verify LUNs: lsblk"

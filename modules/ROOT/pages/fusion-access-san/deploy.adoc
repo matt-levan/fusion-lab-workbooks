@@ -5,15 +5,15 @@ include::partial$fusion-access-san-attrs.adoc[]
 
 == Introduction
 
-This guide covers deploying IBM Fusion Access for SAN after the iSCSI infrastructure is configured. The procedure installs the IBM Fusion Operator, configures Fusion Data Foundation (FDF) for local storage, and enables the External Storage Area Network (SAN) service.
+This guide covers deploying IBM Fusion Access for SAN after the iSCSI infrastructure is configured. The procedure installs the IBM Storage Fusion Operator, configures Fusion Data Foundation (FDF) for local storage, and enables the External Storage Area Network (SAN) service.
 
 Official documentation: https://www.ibm.com/docs/en/fusion-software/{fusion-version}.0?topic=fusion-access-san[IBM Fusion Access for SAN Documentation^]
 
-Note: The steps to add the IBM Operator Catalog and create the IBM entitlement key are already implemented in the TechZone cluster.
+NOTE: In IBM Technology Zone environments, the IBM Operator Catalog and IBM container entitlement secret are pre-configured.
 
 == Step 1: Add IBM Operator Catalog (Reference)
 
-The following is for reference only — already configured in TechZone:
+The IBM Operator Catalog source is pre-configured in TechZone environments. For reference:
 
 [source,yaml]
 ----
@@ -32,11 +32,17 @@ spec:
       interval: 45m
 ----
 
-Verify:
+Verify that the catalog source is ready:
+
 [source,shell]
 ----
-oc apply -f catalog_source.yaml -n openshift-marketplace
 oc get CatalogSources ibm-operator-catalog -n openshift-marketplace
+----
+
+Verify marketplace pods:
+
+[source,shell]
+----
 oc get pods -n openshift-marketplace
 ----
 
@@ -46,66 +52,98 @@ oc get pods -n openshift-marketplace
 2. Navigate to menu:Ecosystem[Software Catalog].
 3. Search for `Fusion` and select the **IBM Storage Fusion** operator tile.
 4. Click btn:[Install].
-5. Leave all options as default:
+5. Keep the default installation settings:
    * **Update channel:** Stable channel (e.g., `v2.x`)
    * **Installation mode:** All namespaces on the cluster (default)
    * **Installed Namespace:** `ibm-spectrum-fusion-ns`
    * **Approval Strategy:** Automatic
 6. Click btn:[Install].
-7. Wait until Operator status shows **Succeeded** / **Installed operator - ready for use**.
+7. Navigate to menu:Ecosystem[Installed Operators] and wait until the status shows **Succeeded**.
 
 == Step 3: Connect to IBM Fusion Console
 
-1. From the OpenShift Console top masthead, click the **Application Menu** (9-square grid).
-2. Click **IBM Storage Fusion**. A new tab opens.
-3. If prompted, select **kube:admin** and enter credentials.
-4. Accept the license agreement: check **I have read and accept the license agreement**, click btn:[Continue].
+1. From the OpenShift Console top navigation bar, click the **Application Menu** (grid icon in masthead).
+2. Click **IBM Storage Fusion**. A new browser tab opens.
+3. If prompted, select **kube:admin** and enter your OpenShift cluster credentials.
+4. Accept the license agreement by checking **I have read and accept the license agreement**, then click btn:[Continue].
 5. You are redirected to the **Welcome to IBM Fusion** dashboard.
 
-== Step 4: Install Fusion Data Foundation (Local Storage)
+== Step 4: Install Fusion Data Foundation
 
-Before configuring External SAN, install FDF for local storage on the cluster.
+Before configuring External SAN, install and configure Fusion Data Foundation (FDF) to provide core storage services for the cluster.
 
-Prerequisite: Local Storage Operator must be installed.
+=== Install the Data Foundation Service
 
-1. In Fusion Console, navigate to **Storage** → **Local storage** and click **Get Started**.
-2. Click **Create Storage Cluster**.
-3. In OpenShift Console, **Create a new StorageClass using local storage devices** is pre-selected. Click btn:[Next].
-4. Leave **Use Ceph RBD** as default StorageClass. Optionally select **Set default StorageClass for Virtualization**. Click btn:[Next].
-5. Choose **Disks on selected nodes** and select the **infra nodes** for Data Foundation. Click btn:[Next].
-6. Select **Yes** to Create LocalVolumeSet. Click btn:[Next].
-7. Use default options. Click btn:[Next].
-8. Click **Create Storage systems**.
-9. Wait for the storage cluster to become **Healthy**.
+1. In the IBM Fusion Console, navigate to **Services** in the left navigation menu.
+2. Locate the **Data Foundation** service tile and click the tile.
+3. Click btn:[Install].
+4. On the **Install service** screen, select the **Local** tile and click btn:[Install].
++
+[NOTE]
+====
+Selecting **Local** automatically installs the Local Storage Operator (LSO). No separate LSO installation step is required.
+====
+
+=== Configure the Storage Cluster
+
+1. In the Fusion Console left menu, navigate to menu:Storage[Local storage] and click btn:[Get Started].
+2. Click btn:[Create Storage Cluster].
+3. In the OpenShift Console storage wizard, verify that **Create a new StorageClass using local storage devices** is selected, then click btn:[Next].
+4. Keep **Use Ceph RBD** as the default StorageClass, then click btn:[Next].
+5. For **LocalVolumeSet name**, enter `ibm-spectrum-fusion-local`. The **StorageClass name** field is filled with the same value. Leave it as is.
+6. Under **Filter disks by**, select **Disks on selected nodes**, then select only the three infra nodes (for example, `infra-1`, `infra-2`, and `infra-3`).
+7. Leave **Disk type** set to **SSD / NVMe**. This is the only disk type supported for internal mode deployments.
+8. Expand **Advanced** and set the following:
+   * **Volume mode:** `Block` (default)
+   * **Device type:** `Disk` and `Part` (default)
+   * **Disk size > Minimum:** `100`, with **Units** set to `GiB`, so that only disks larger than 100 GiB are used
+   * **Maximum:** leave empty
+   * **Maximum disks limit:** leave as `All`
+9. Click btn:[Next], select **Yes** to Create LocalVolumeSet, then click btn:[Next].
+10. Accept the default capacity settings, then click btn:[Next].
+11. On the **Security and network** page, accept the defaults and click btn:[Next]:
+   * **Encryption:** leave **Enable data encryption for block and file storage** and **In-transit encryption** cleared
+   * **Network:** leave **Default (Pod)** selected
+   * **Network isolation:** leave **Isolate network using Multus** cleared
+12. On the **Review and create** page, click btn:[Create Storage systems].
+13. Wait for the storage cluster status to transition to **Healthy**.
 
 === Validate Storage Classes
+
+From your terminal, verify the newly created storage classes:
 
 [source,shell]
 ----
 oc get storageclass
 ----
 
-=== Create Storage for OpenShift Image Registry
+=== Configure Storage for OpenShift Image Registry
 
-. Navigate to **Storage** → **PersistentVolumeClaims**.
-. Change to the `openshift-image-registry` namespace.
-. Create a new CephFS volume:
-   * StorageClass: **CephFS**
-   * Name: `imageregistry`
-   * Size: `100G`
-   * Access Mode: **RWX**
-   * Click **Create**.
+[IMPORTANT]
+====
+This step is only required to provide persistent storage for the OpenShift image registry.
+====
 
-. Patch the image registry:
+Create persistent storage for the OpenShift internal container image registry using CephFS:
+
+1. In OpenShift Console, navigate to menu:Storage[PersistentVolumeClaims].
+2. Switch to the `openshift-image-registry` namespace.
+3. Click btn:[Create PersistentVolumeClaim]:
+   * **StorageClass:** `ocs-storagecluster-cephfs`
+   * **PVC Name:** `imageregistry`
+   * **Access Mode:** Shared access (RWX)
+   * **Size:** `100 GiB`
+4. Click btn:[Create].
+
+Patch the OpenShift Image Registry operator to use the new PVC:
 
 [source,shell]
 ----
-oc patch configs.imageregistry.operator.openshift.io cluster \
-  --type merge \
-  -p '{"spec":{"managementState":"Managed","storage":{"pvc":{"claim":"imageregistry"}}}}'
+oc patch configs.imageregistry.operator.openshift.io cluster --type merge -p '{"spec":{"managementState":"Managed","storage":{"pvc":{"claim":"imageregistry"}}}}'
 ----
 
-. Verify:
+Verify that the image registry cluster operator is healthy and available:
+
 [source,shell]
 ----
 oc get clusteroperator image-registry
@@ -113,79 +151,180 @@ oc get clusteroperator image-registry
 
 == Step 5: Configure External SAN (Fusion Access for SAN)
 
-Now configure the SAN storage using the iSCSI LUNs prepared earlier.
+Now configure External SAN storage utilizing the shared iSCSI LUNs prepared in the previous step.
 
-1. In Fusion Console, navigate to **Data Foundation** → **External Systems**.
-2. Click **Connect external Systems**, select **Storage Area Network**, click btn:[Next].
-3. Switch from "All nodes" to **Select nodes**.
-4. Select only the **worker nodes** ({worker-node-prefix}1, {worker-node-prefix}2, {worker-node-prefix}3).
-5. Name your filesystem: `scale1` (or `{storage-class-name}`).
-6. Click **Connect and Create**.
+1. In the IBM Fusion Console, navigate to menu:Data Foundation[External Systems].
+2. Click btn:[Connect external Systems].
+3. Select **Storage Area Network** and click btn:[Next].
+4. Under **Select local cluster nodes**, keep **All Nodes (Default)** selected. All non control plane nodes are selected to handle requests to IBM Scale.
+5. Under **LUN group details**, enter `{fas-fs-name}` for **Name**.
+6. Under **LUNs**, select both of the shared LUNs (for example, `/dev/dm-0` and `/dev/dm-1`, 500 GiB each). Use the checkbox in the table header to select all LUNs.
+7. Click btn:[Connect and create].
 
-Wait for the filesystem to become **Ready**.
+=== Monitor Storage Scale Pods
 
-=== Monitor Deployment
-
-Monitor pods in the `ibm-spectrum-scale` namespace:
+Monitor the rollout of the IBM Storage Scale pods in the `ibm-spectrum-scale` namespace:
 
 [source,shell]
 ----
 oc get pods -n ibm-spectrum-scale -w
 ----
 
-Expected pods when ready:
-```
-NAME                               READY   STATUS    RESTARTS   AGE
-ibm-spectrum-scale-gui-0           4/4     Running   0          13m
-ibm-spectrum-scale-gui-1           4/4     Running   0          9m26s
-ibm-spectrum-scale-pmcollector-0   2/2     Running   0          13m
-ibm-spectrum-scale-pmcollector-1   2/2     Running   0          10m
-worker-1                           2/2     Running   0          13m
-worker-2                           2/2     Running   0          13m
-worker-3                           2/2     Running   0          13m
-```
+Expected pod state when initialization completes:
 
-Note: Unlike normal CNSA where core pods run on all worker nodes, for Fusion Access for SAN, core pods are only deployed on the selected worker nodes.
+[source,text]
+----
+NAME                                                     READY   STATUS    RESTARTS   AGE
+ibm-spectrum-scale-controller-manager-54f8cbb9bb-zp68b   1/1     Running   0          15m
+ibm-spectrum-scale-gui-0                                 4/4     Running   0          14m
+ibm-spectrum-scale-gui-1                                 4/4     Running   0          11m
+ibm-spectrum-scale-pmcollector-0                         2/2     Running   0          14m
+ibm-spectrum-scale-pmcollector-1                         2/2     Running   0          12m
+itz-ria1e6-worker-1                                      2/2     Running   0          14m
+itz-ria1e6-worker-2                                      2/2     Running   0          14m
+itz-ria1e6-worker-3                                      2/2     Running   0          14m
+----
 
-=== Check Custom Resources
+=== Verify Scale Custom Resources
+
+Check the Scale Cluster CR:
 
 [source,shell]
 ----
-oc get cluster -n ibm-spectrum-scale
-oc get localdisk -n ibm-spectrum-scale
-oc get filesystem -n ibm-spectrum-scale
+oc get cluster.scale.spectrum.ibm.com -A
 ----
 
-Expected filesystem status progression:
-```
-NAME                   ESTABLISHED   HEALTHY       AGE
-{storage-class-name}   False         NotReported   104s
-...
-{storage-class-name}   True          Healthy       3m26s
-```
+Expected output:
+
+[source,text]
+----
+NAME                 EDITION           AGE
+ibm-spectrum-scale   data-management   20m
+----
+
+Check the discovered shared local disks:
+
+[source,shell]
+----
+oc get localdisks.scale.spectrum.ibm.com -n ibm-spectrum-scale
+----
+
+Expected output showing both shared LUNs in `Healthy` status:
+
+[source,text]
+----
+NAME                                           TYPE     READY   USED   AVAILABLE   HEALTHY   FILESYSTEM   SIZE        AGE
+localdisk-0x600140539ac1d0f357340dba63680f70   shared   True    True   True        Healthy   scale1       500.0 GiB   21m
+localdisk-0x6001405bf688010ada448ed909c2fcd0   shared   True    True   True        Healthy   scale1       500.0 GiB   21m
+----
+
+Check the filesystem state:
+
+[source,shell]
+----
+oc get filesystems.scale.spectrum.ibm.com -n ibm-spectrum-scale
+----
+
+Expected output showing `ESTABLISHED True` and `HEALTHY Healthy`:
+
+[source,text]
+----
+NAME     ESTABLISHED   HEALTHY   MOUNTED   AGE
+scale1   True          Healthy   True      20m
+----
 
 === Access IBM Storage Scale CNSA GUI
 
-[source,shell]
-----
-echo -e "https://`kubectl get route -n ibm-spectrum-scale ibm-spectrum-scale-gui -ojson | jq -r .spec.host`"
-----
-
-Authenticate with OpenShift credentials to access the CNSA GUI dashboard.
-
-== Step 6: Verify Storage Class Creation
-
-The Fusion Access for SAN operator automatically creates a StorageClass named `{storage-class-name}` (or your custom name).
+Retrieve the Scale GUI console route URL:
 
 [source,shell]
+----
+oc get route -n ibm-spectrum-scale ibm-spectrum-scale-gui -o jsonpath='https://{.spec.host}{"\n"}'
+----
+
+Open the displayed URL in a browser and log in using your OpenShift cluster credentials to view the Storage Scale monitoring dashboard.
+
+== Step 6: Verify StorageClass Creation
+
+The Fusion Access for SAN operator automatically creates two StorageClasses for the `{fas-fs-name}` filesystem: `{storage-class-name}` and `{storage-class-vm-name}`.
+
+Verify the StorageClass for containerized workloads:
+
+[source,shell,subs="attributes+"]
+----
+oc get storageclass {storage-class-name}
+----
+
+Expected output:
+
+[source,text]
+----
+NAME         PROVISIONER                 RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+san-scale1   spectrumscale.csi.ibm.com   Delete          Immediate           true                   20m
+----
+
+Verify the StorageClass for OpenShift Virtualization VMs:
+
+[source,shell,subs="attributes+"]
+----
+oc get storageclass {storage-class-vm-name}
+----
+
+Expected output:
+
+[source,text]
+----
+NAME            PROVISIONER                 RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+san-scale1-vm   spectrumscale.csi.ibm.com   Delete          Immediate           true                   21m
+----
+
+Inspect the StorageClass details:
+
+[source,shell,subs="attributes+"]
 ----
 oc get storageclass {storage-class-name} -o yaml
 ----
 
-This StorageClass is used for provisioning RWX PVCs for OpenShift Virtualization VMs.
+This StorageClass provides RWX block-backed persistent volumes for containerized workloads and OpenShift Virtualization VMs.
 
-=== Filesystem Block Size
+=== Set the VM StorageClass as the Default for Virtualization
 
-Note: The default filesystem block size is 4MB.
+Set `{storage-class-vm-name}` as the default StorageClass for virtualization *before* you install OpenShift Virtualization in the next guide, so that OpenShift Virtualization uses it from the start. The default virtualization StorageClass is set with the `storageclass.kubevirt.io/is-default-virt-class` annotation. It is separate from the cluster default StorageClass.
+
+==== Option A: Set the default via the OpenShift Web Console
+
+1. In the OpenShift Web Console, navigate to menu:Storage[StorageClasses].
+2. Click `{storage-class-vm-name}`.
+3. Click the **YAML** tab.
+4. Under `metadata.annotations`, add the following annotation (create the `annotations` section if it does not exist):
++
+[source,yaml]
+----
+storageclass.kubevirt.io/is-default-virt-class: "true"
+----
+5. Click btn:[Save].
+
+==== Option B: Set the default via the CLI
+
+Annotate the StorageClass:
+
+[source,shell,subs="attributes+"]
+----
+oc annotate storageclass {storage-class-vm-name} storageclass.kubevirt.io/is-default-virt-class=true --overwrite
+----
+
+==== Verify the Default Virtualization StorageClass
+
+Verify the annotation. The expected output is `true`:
+
+[source,shell,subs="attributes+"]
+----
+oc get storageclass {storage-class-vm-name} -o jsonpath='{.metadata.annotations.storageclass\.kubevirt\.io/is-default-virt-class}{"\n"}'
+----
+
+[NOTE]
+====
+Only one StorageClass should carry this annotation. To check, run `oc get storageclass -o yaml | grep is-default-virt-class`. If another StorageClass (for example, one created by Data Foundation) has it set to `"true"`, remove it so that `{storage-class-vm-name}` is the only virtualization default.
+====
 
 include::partial$nav-fusion-access-san-deploy.adoc[]

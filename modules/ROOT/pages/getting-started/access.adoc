@@ -22,7 +22,7 @@ Before proceeding, collect the following into a working folder on your local mac
 * btn:[Download] the **private SSH key** — saves as `vm_ssh_key.vm` (check your Downloads folder)
 * Note or copy the following values from the hidden fields (click the eye icon to reveal):
 ** **Cluster Admin Password** (username is `kubeadmin`)
-** **Bastion Password** (username is `itzuser` — used for `sudo` on the Bastion, not SSH login)
+** **Bastion Password** (username is `itzuser` — required when logging in via the **VM Remote Console** window)
 * Note the **Bastion SSH connection** command — it is pre-built with the correct hostname and port
 * Note the **API URL** — used for `oc login`
 
@@ -37,7 +37,7 @@ The following table describes every field in the Outputs panel:
 | **Cluster Admin Password** | Hidden — click the eye or copy icon
 | **Bastion SSH connection** | Pre-built SSH command — copy and paste directly into your terminal
 | **Bastion Username** | `itzuser`
-| **Bastion Password** | Hidden — required only for `sudo` on the Bastion, not for SSH login
+| **Bastion Password** | Hidden — required when logging in via the **VM Remote Console**
 | **Download kubeconfig** | btn:[Download] — saves as `conf_kubeconfig_download.conf`
 | **The private SSH key** | btn:[Download] — required to authenticate SSH to the Bastion
 | **VM Remote Console** | Browser-based VNC access to the underlying cluster VMs
